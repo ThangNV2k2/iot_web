@@ -1,0 +1,39 @@
+{
+  "name": "natural-disaster-api",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "license": "MIT",
+  "scripts": {
+    "start": "tsc && node ./build/server.js",
+    "dev": "nodemon"
+  },
+  "dependencies": {
+    "@sequelize/mysql": "^7.0.0-alpha.45",
+    "bcrypt": "^5.1.1",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "http-status-codes": "^2.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "lodash": "^4.17.21",
+    "mongoose": "^8.9.1",
+    "mqtt": "^5.10.4",
+    "sequelize": "^6.37.6",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/lodash": "^4.17.13",
+    "@types/node": "^22.10.2",
+    "nodemon": "^3.1.9",
+    "tsc": "^2.0.4",
+    "typescript": "^5.8.2"
+  }
+}
