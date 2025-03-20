@@ -1,20 +1,24 @@
-import {Map, Overlay, View} from "ol";
-import {fromLonLat} from "ol/proj";
+import { Map, Overlay, View } from "ol";
+import { fromLonLat } from "ol/proj";
 import TileLayer from "ol/layer/Tile";
-import {XYZ} from "ol/source";
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import WarningSystem, {WaterLevel} from "./component/NoteShape";
+import { XYZ } from "ol/source";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import WarningSystem, { WaterLevel } from "./component/NoteShape";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import Shape from "./component/Shape";
-import {createRoot} from "react-dom/client";
-import {Box, Button, Card, CardContent, Divider, Drawer, Grid, Stack, Typography,} from "@mui/material";
-import {geodeticToECEF} from "./math";
-import {connectMQTT} from "./mqtt";
+import { createRoot } from "react-dom/client";
+import { Box, Button, Card, CardContent, Divider, Drawer, Grid, Stack, Typography, } from "@mui/material";
+import { ecefToGeodetic, geodeticToECEF } from "./math";
+import { connectMQTT } from "./mqtt";
 import ChartRover from "./component/ChartRover";
 import axiosInstance from "./axios";
 import _ from "lodash";
-import { forEach } from "mathjs";
+import { forEach, intersect } from "mathjs";
+import OffPre from "./assets/img/off_re.png";
+import LuSatLo from "./assets/img/lu_satlo-removebg-preview (1).png";
+import SatLoWarning from "./assets/img/sat_lo-removebg-preview.png";
+import H4 from "./assets/img/h_4-removebg-preview.png";
 
 interface IBase {
     device_id: number;
@@ -28,6 +32,12 @@ interface IBase {
 }
 
 type DataStructure = [IBase[], IBase | null, IBase | null];
+interface BaseStation {
+    ecef_x: number;
+    ecef_y: number;
+    ecef_z: number;
+    mode: number;
+}
 
 export default function App() {
     const [drawer, setDrawer] = useState<any>(null);
@@ -36,9 +46,15 @@ export default function App() {
     const [milestones, setMilestones] = useState([]);
     const [virtualData, setVirtualData] = useState([]);
     const [isVirtual, setIsVirtual] = useState(false);
+    const [baseStation, setBaseStation] = useState<BaseStation>({
+        ecef_x: -1619338.8093,
+        ecef_y: 5730716.3346,
+        ecef_z: 2276572.7906,
+        mode: 2
+    });
 
     useEffect(() => {
-        axiosInstance.get("/iot/statisticals").then(({data}) => {
+        axiosInstance.get("/iot/statisticals").then(({ data }) => {
             return setStatisticals(data);
         });
 
@@ -64,7 +80,7 @@ export default function App() {
                                     const newData = [...prev[index].data, device.data[0]];
                                     const newPrev = [...prev];
                                     newPrev[index] = { ...prev[index], data: newData };
-                                    return newPrev; 
+                                    return newPrev;
                                 } else {
                                     return [...prev, { label: device.label, data: [device.data[0]] }];
                                 }
@@ -82,7 +98,7 @@ export default function App() {
     useEffect(() => {
         axiosInstance
             .get("/iot/milestones")
-            .then(({data}) => data && setMilestones(data));
+            .then(({ data }) => data && setMilestones(data));
     }, [setMilestones]);
 
     const [satLo, mucNuoc, truyenThong] = useMemo<DataStructure>(
@@ -107,35 +123,79 @@ export default function App() {
         [statisticals.toString()]
     );
     const gateWay = useMemo(() => {
+        const [lat, lng, alt] = ecefToGeodetic(baseStation.ecef_x, baseStation.ecef_y, baseStation.ecef_z);
         return {
             device_id: 1,
             dev_type: 1,
-            lat: 10.731734956192984,
-            lng: 106.69803721044785,
-            alt: 1268,
+            lat: lat,
+            lng: lng,
+            alt: alt,
             fix_type: 1,
             satellites: 10,
             timestamp: new Date(),
         };
-    }, []);
-    const [overlays, setOverlays] = useState<Overlay[]>([]);
+        // return {
+        //     device_id: 1,
+        //     dev_type: 1,
+        //     lat: 10.731734956192984,
+        //     lng: 106.69803721044785,
+        //     alt: 1268,
+        //     fix_type: 1,
+        //     satellites: 10,
+        //     timestamp: new Date(),
+        // };
+    }, [baseStation]);
+    const canhBaoTypeF = () => {
+        const distance = (curr) => {
+            const milestone = milestones.find(
+                (m) => m.device_id === curr.device_id
+            );
+            if (!milestone) {
+                return 0;
+            }
+            const [x1, y1, z1] = geodeticToECEF(
+                milestone.lat,
+                milestone.lng,
+                milestone.alt
+            );
+
+            const [x2, y2, z2] = geodeticToECEF(curr.lat, curr.lng, curr.alt);
+
+            return Math.sqrt(
+                (x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2
+            );
+        };
+
+
+        const canhBaoSatLo = satLo.length == 0 ? 0 : satLo.reduce((sum, d) => sum + distance(d), 0) / satLo.length;
+        const h = mucNuoc?.sensors?.H1 ?? 0;
+        const canhBaoTruyenThong = (typeof truyenThong?.sensors?.D !== String) ? false : (truyenThong?.sensors?.D.split("0").length - 1) < 3 ? false : true;
+        if (canhBaoSatLo < 20 && h < 120 && !canhBaoTruyenThong) return 1;
+        if (canhBaoSatLo > 20 && h < 120 && !canhBaoTruyenThong) return 2;
+        if (canhBaoSatLo < 20 && (h >= 120 || canhBaoTruyenThong)) return 3;
+        if (canhBaoSatLo >= 20 && h >= 120 && canhBaoTruyenThong) return 4;
+        return 0;
+    }
 
     const center = useMemo(() => {
-        if (!statisticals?.length) return fromLonLat([22.497709, 103.897874]);
+        if (!satLo || satLo.length === 0) return fromLonLat([106.69803721044785, 10.731734956192984]);
         const avgLat =
-            statisticals?.reduce((sum, d) => sum + d.lat, 0) / statisticals?.length;
+            satLo?.reduce((sum, d) => sum + d.lat, 0) / satLo?.length;
         const avgLng =
-            statisticals?.reduce((sum, d) => sum + d.lng, 0) / statisticals?.length;
+            satLo?.reduce((sum, d) => sum + d.lng, 0) / satLo?.length;
         return fromLonLat([avgLng, avgLat]);
-    }, [statisticals]);
+    }, [satLo]);
 
     const newOverlays = [];
     const devices = [...satLo, mucNuoc, truyenThong, gateWay].filter(Boolean);
     const mapRef = useRef<HTMLDivElement>(null);
-    const mapInstanceRef = useRef<Map | null>(null); 
+    const mapInstanceRef = useRef<Map | null>(null);
+
+    const overlayRefs = useRef<Overlay[]>([]);
+
     useEffect(() => {
         if (!mapRef.current) return;
-    
+
         if (!mapInstanceRef.current) {
             mapInstanceRef.current = new Map({
                 target: mapRef.current,
@@ -148,46 +208,50 @@ export default function App() {
                     new VectorLayer({ source: new VectorSource() }),
                 ],
                 view: new View({
-                    center: fromLonLat([106.69803721044785, 10.731734956192984]),
+                    center: center,
                     zoom: 18,
                 }),
                 controls: [],
             });
         }
-    
+
         const mapInstance = mapInstanceRef.current;
-        
-        overlays.forEach((overlay) => mapInstance.removeOverlay(overlay));
-    
-        const newOverlays = [];
-        devices.forEach((device) => {
+        const type = canhBaoTypeF();
+
+        overlayRefs.current.forEach((overlay) => mapInstance.removeOverlay(overlay));
+        overlayRefs.current = []; 
+
+        const newOverlays: Overlay[] = devices.map((device) => {
             const { lat, lng } = device;
             const coordinate = fromLonLat([lng, lat]);
-    
+
             const container = document.createElement("div");
             container.style.position = "absolute";
             container.style.transform = "translate(-50%, -50%)";
-    
+
             const overlay = new Overlay({
                 position: coordinate,
                 positioning: "center-center",
                 element: container,
             });
-    
+
             mapInstance.addOverlay(overlay);
-            newOverlays.push(overlay);
-    
+
             createRoot(container).render(
-                <ShowDetail device={device} isOnline setDrawer={() => setDrawer(device)} />
+                <ShowDetail device={device} isOnline setDrawer={() => setDrawer(device)} type={type} />
             );
+
+            return overlay;
         });
-    
-        setOverlays(newOverlays);
-    }, [satLo, mucNuoc, truyenThong, gateWay]);
+
+        overlayRefs.current = newOverlays;
+
+    }, [satLo, mucNuoc, truyenThong, gateWay, center]);
+
 
     const chartDataSet = useMemo(() => {
         const set = [];
-        const {satLo} = statisticals.reduce((prev, curr) => {
+        const { satLo } = statisticals.reduce((prev, curr) => {
             if (curr.dev_type === 2) {
                 if (!prev.satLo) {
                     prev.satLo = [];
@@ -216,7 +280,7 @@ export default function App() {
                     ...curr,
                     chartData: distance,
                 });
-            } 
+            }
             // else if (curr.dev_type === 3) {
             //     if (!prev.mucNuoc) {
             //         prev.mucNuoc = [];
@@ -248,20 +312,23 @@ export default function App() {
 
         return set;
     }, [milestones, statisticals]);
+    const h = mucNuoc?.sensors?.H1 ?? 0;
+    const mucNuocCurr = h <= 40 ? 0 : h <= 80 ? 1 : h <= 120 ? 2 : h <= 160 ? 3 : h <= 200 ? 4 : 5;
     return (
         <>
-            <div ref={mapRef} style={{width: "100%", height: "700px"}}/>
+            <div ref={mapRef} style={{ width: "100%", height: "700px" }} />
             <div>
-                <WarningSystem/>
+                <WarningSystem mucNuoc={mucNuocCurr} />
             </div>
             <div>
-                <ChartRover dataSet={isVirtual ? virtualData : chartDataSet}/>
+                <ChartRover dataSet={isVirtual ? virtualData : chartDataSet} />
             </div>
 
             {drawer !== null && (
                 <DrawerDetail
                     data={drawer}
                     toggleDrawer={() => setDrawer(null)}
+                    type={canhBaoTypeF()}
                 />
             )}
         </>
@@ -269,36 +336,38 @@ export default function App() {
 }
 
 const DrawerDetail = ({
-                          data,
-                          toggleDrawer,
-                      }: {
+    data,
+    toggleDrawer,
+    type
+}: {
     data: any;
     toggleDrawer: () => void;
+    type: number
 }) => {
     return (
         <Drawer
             open={Boolean(data)}
             onClose={toggleDrawer}
             anchor="right"
-            sx={{"& .MuiDrawer-paper": {width: 350, p: 2}}}
+            sx={{ "& .MuiDrawer-paper": { width: 350, p: 2 } }}
         >
-            <Typography variant="h6" fontWeight="bold" sx={{mb: 2}}>
+            <Typography variant="h6" fontWeight="bold" sx={{ mb: 2 }}>
                 Thông tin chi tiết
             </Typography>
             {data?.dev_type === 2 ? (
-                <SatLo device={data}/>
+                <SatLo device={data} />
             ) : data?.dev_type === 3 ? (
-                <MucNuoc device={data}/>
+                <MucNuoc device={data} />
             ) : data?.dev_type === 4 ? (
-                <MachTruyenThong device={data}/>
+                <MachTruyenThong device={data} />
             ) : (
-                <Typography variant="body1">No data available</Typography>
+                <GatWay type={type} width={70} height={50} />
             )}
         </Drawer>
     );
 };
 
-const MucNuoc = ({device}: { device: any }) => {
+const MucNuoc = ({ device }: { device: any }) => {
     const h = device.sensors.H1;
     const mucNuoc =
         h <= 40 ? 0 : h <= 80 ? 1 : h <= 120 ? 2 : h <= 160 ? 3 : h <= 200 ? 4 : 5;
@@ -307,17 +376,17 @@ const MucNuoc = ({device}: { device: any }) => {
             <Typography variant="h6" color="primary" fontWeight="bold">
                 Mực nước H: {h} cm
             </Typography>
-            <WaterLevel isNote={false} mucNuoc={mucNuoc}/>
+            <WaterLevel isNote={false} mucNuoc={mucNuoc} />
         </>
     );
 };
 
 const SatLo = ({
-                   device,
-               }: {
+    device,
+}: {
     device: any;
 }) => {
-    const {lat, lng, alt, device_id} = device;
+    const { lat, lng, alt, device_id } = device;
     const [milestones, setMilestones] = useState(device);
 
     const [x1, y1, z1] = geodeticToECEF(
@@ -331,7 +400,7 @@ const SatLo = ({
     useEffect(() => {
         axiosInstance
             .get("/iot/milestones/" + device_id)
-            .then(({data}) => data && setMilestones(data));
+            .then(({ data }) => data && setMilestones(data));
     }, [device_id, setMilestones]);
 
     const distance = Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2);
@@ -339,13 +408,13 @@ const SatLo = ({
     const handleReset = useCallback(() => {
         axiosInstance
             .post("/iot/save-milestone", {
-                data: {lat, lng, alt, device_id},
+                data: { lat, lng, alt, device_id },
             })
-            .then(() => setMilestones({lat, lng, alt, device_id}));
+            .then(() => setMilestones({ lat, lng, alt, device_id }));
     }, [axiosInstance, setMilestones, lat, lng, alt, device_id]);
 
     return (
-        <Card sx={{boxShadow: 3}}>
+        <Card sx={{ boxShadow: 3 }}>
             <CardContent>
                 <Typography variant="h6" color="primary" fontWeight="bold">
                     Rover sạt lở
@@ -359,12 +428,12 @@ const SatLo = ({
                         fontFamily: "monospace",
                     }}
                 >
-                    X: {x1.toFixed(2)} <br/>
-                    Y: {y1.toFixed(2)} <br/>
+                    X: {x1.toFixed(2)} <br />
+                    Y: {y1.toFixed(2)} <br />
                     Z: {z1.toFixed(2)}
                 </Box>
 
-                <Divider sx={{my: 2}}/>
+                <Divider sx={{ my: 2 }} />
 
                 <Box
                     sx={{
@@ -375,12 +444,12 @@ const SatLo = ({
                         fontFamily: "monospace",
                     }}
                 >
-                    X: {x2.toFixed(2)} <br/>
-                    Y: {y2.toFixed(2)} <br/>
+                    X: {x2.toFixed(2)} <br />
+                    Y: {y2.toFixed(2)} <br />
                     Z: {z2.toFixed(2)}
                 </Box>
 
-                <Divider sx={{my: 2}}/>
+                <Divider sx={{ my: 2 }} />
 
                 <Typography variant="h6" fontWeight="bold">
                     D:{" "}
@@ -393,7 +462,7 @@ const SatLo = ({
                     onClick={handleReset}
                     variant="contained"
                     color="primary"
-                    sx={{mt: 2}}
+                    sx={{ mt: 2 }}
                 >
                     Reset
                 </Button>
@@ -402,7 +471,7 @@ const SatLo = ({
     );
 };
 
-const MachTruyenThong = ({device}: { device: any }) => {
+const MachTruyenThong = ({ device }: { device: any }) => {
     const items = [
         ["A1", "D1"],
         ["A2", "D2"],
@@ -411,7 +480,7 @@ const MachTruyenThong = ({device}: { device: any }) => {
         ["A5", "D5"],
         ["A6", "D6"],
     ];
-    const {sensors} = device;
+    const { sensors } = device;
     const [d1, d2, d3, d4, d5] = sensors.D;
     const checkPress = (text: string) => {
         if (text === "D5" && d5 === 0) return true;
@@ -452,16 +521,26 @@ const MachTruyenThong = ({device}: { device: any }) => {
     );
 };
 
+const GatWay = ({ type, width, height }: { type: number; width: number, height: number }) => {
+    return (
+        <div>
+            <img src={type == 1 ? OffPre : type == 2 ? SatLoWarning : type == 3 ? H4 : LuSatLo} alt="gateway" height={height} />
+        </div>
+    )
+}
+
 const ShowDetail = ({
-                        device,
-                        isOnline,
-                        setDrawer,
-                    }: {
+    device,
+    isOnline,
+    setDrawer,
+    type
+}: {
     device: any;
     isOnline: boolean;
     setDrawer: () => void;
+    type: number
 }) => {
-    const {lat, lng, alt, dev_type} = device;
+    const { lat, lng, alt, dev_type } = device;
     const coordinate = fromLonLat([lng, lat]);
     const [color, setColor] = useState("");
 
@@ -472,9 +551,10 @@ const ShowDetail = ({
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
-                    justifyContent: "space-between",
+                    justifyContent: "space-between"
                 }}
             >
+                <GatWay width={35} height={35} type={type} />
                 <Shape
                     shape="rectangle"
                     color={isOnline ? "#00ff00" : "gray"}

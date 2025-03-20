@@ -16,14 +16,18 @@ export const WaterLevel = ({mucNuoc, isNote = true}: {mucNuoc: number, isNote: b
         {levels.map((color, index) => (
           <Box key={index} display="flex" alignItems="center">
             <Shape shape="square" color={color} size={16} paddingY={2} border borderSize={1} borderColor="#8B0000" />
-            {isNote && index === 0 && <Typography variant="body2" color="red" paddingInlineStart={2} marginBlockEnd={2}>Mực nước có 6 mức nước. Khi nước ở mức nào thì mũi tên sẽ chỉ vào ô đó</Typography>}
-            {mucNuoc === 5 - index && (
-              <Box minWidth="80px" marginLeft={1}>
+            <Box display="flex" flexDirection="column" paddingInlineStart={2}>
+              {isNote && index === 0 && (
+                <Typography variant="body2" color="red" display="block">
+                  Mực nước có 6 mức nước. Khi nước ở mức nào thì mũi tên sẽ chỉ vào ô đó
+                </Typography>
+              )}
+              {mucNuoc === 5 - index && (
                 <Typography variant="body1" color="red">
                   ⬅ MỨC NƯỚC
                 </Typography>
-              </Box>
-            )}
+              )}
+            </Box>
           </Box>
         ))}
       </Box>
@@ -31,7 +35,7 @@ export const WaterLevel = ({mucNuoc, isNote = true}: {mucNuoc: number, isNote: b
   );
 };
 
-export default function WarningSystem() {
+export default function WarningSystem(props) {
   return (
     <Box display="flex" flexDirection="row" justifyContent="space-between" p={3}>
       <Box>
@@ -50,7 +54,7 @@ export default function WarningSystem() {
           <Typography variant="body2" color="red">Đo mức nước dâng túi nước khi chưa Online</Typography>
         </Box>
       </Box>
-      <WaterLevel mucNuoc={0} />
+      <WaterLevel mucNuoc={props.mucNuoc} />
     </Box>
   );
 }
